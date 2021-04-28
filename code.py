@@ -1,65 +1,20 @@
-from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit
-from numpy import pi
+from qiskit import QuantumCircuit, assemble, Aer
 
-### Состояние GHZ (запутанность)
-qreg_q = QuantumRegister(3, 'q')
-creg_c = ClassicalRegister(3, 'c')
-circuit = QuantumCircuit(qreg_q, creg_c)
+sim = Aer.get_backend('qasm_simulator')  # локальный симулятор
+qc = QuantumCircuit(4, 2)  # схема с четырьмя кубитами и двумя выходами
 
-circuit.reset(qreg_q[0])
-circuit.reset(qreg_q[1])
-circuit.reset(qreg_q[2])
-circuit.h(qreg_q[0])
-circuit.cx(qreg_q[0], qreg_q[1])
-circuit.cx(qreg_q[0], qreg_q[2])
-circuit.measure(qreg_q[0], creg_c[0])
-circuit.measure(qreg_q[1], creg_c[1])
-circuit.measure(qreg_q[2], creg_c[2])
-print(circuit)
+qc.x(0)  # инвертируем нулевой кубит (NOT)
+qc.x(1)
 
+qc.cx(0, 2)  # XOR нулевого кубита со вторым, результат записывается во второй (CNOT)
+qc.cx(1, 2)
+qc.ccx(0, 1, 3)  # AND нулевого кубита с первым, результат записывается в третий (CCNOT)
 
-### Состояние W (запутанность)
-qreg_q = QuantumRegister(3, 'q')
-creg_c = ClassicalRegister(3, 'c')
-circuit = QuantumCircuit(qreg_q, creg_c)
+qc.measure(2, 0)  # результат XOR записывается в нулевой кубит
+qc.measure(3, 1)  # AND - в первый
 
-circuit.reset(qreg_q[0])
-circuit.reset(qreg_q[1])
-circuit.reset(qreg_q[2])
-circuit.ry(1.9106332362490184, qreg_q[0])
-circuit.cu(pi/2, pi/2, pi/2, pi/2, qreg_q[0], qreg_q[1])
-circuit.cx(qreg_q[1], qreg_q[2])
-circuit.cx(qreg_q[0], qreg_q[1])
-circuit.x(qreg_q[0])
-circuit.measure(qreg_q[0], creg_c[0])
-circuit.measure(qreg_q[1], creg_c[1])
-circuit.measure(qreg_q[2], creg_c[2])
+print(qc)  # принт схемы
 
-
-### Multi7x1Mod15
-qreg_q = QuantumRegister(4, 'q')
-creg_c = ClassicalRegister(4, 'c')
-circuit = QuantumCircuit(qreg_q, creg_c)
-
-circuit.reset(qreg_q[0])
-circuit.reset(qreg_q[1])
-circuit.reset(qreg_q[2])
-circuit.reset(qreg_q[3])
-circuit.x(qreg_q[3])
-circuit.x(qreg_q[0])
-circuit.x(qreg_q[1])
-circuit.x(qreg_q[2])
-circuit.x(qreg_q[0])
-circuit.cx(qreg_q[1], qreg_q[2])
-circuit.cx(qreg_q[2], qreg_q[1])
-circuit.cx(qreg_q[1], qreg_q[2])
-circuit.cx(qreg_q[0], qreg_q[1])
-circuit.cx(qreg_q[1], qreg_q[0])
-circuit.cx(qreg_q[0], qreg_q[1])
-circuit.cx(qreg_q[0], qreg_q[3])
-circuit.cx(qreg_q[3], qreg_q[0])
-circuit.cx(qreg_q[0], qreg_q[3])
-circuit.measure(qreg_q[0], creg_c[0])
-circuit.measure(qreg_q[1], creg_c[1])
-circuit.measure(qreg_q[2], creg_c[2])
-circuit.measure(qreg_q[3], creg_c[3])
+qс_job = assemble(qc)  # преобразование схемы в объект, который сможем запустить в бэкэнде
+counts = sim.run(qс_job).result()  # запуск эксперимента
+print(counts.get_counts())  # результаты

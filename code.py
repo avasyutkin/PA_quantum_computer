@@ -1,5 +1,5 @@
 from qiskit import QuantumCircuit, assemble, Aer
-from math import sqrt, pi
+from math import sqrt
 
 
 ### сложение битов
@@ -44,3 +44,30 @@ print(result.get_statevector())
 print(result.get_counts())
 print('________________')
 print()
+
+
+### CNOT-Gate (инвертирует первый кубит, если значение второго равно 1)
+sim = Aer.get_backend('statevector_simulator')
+
+qc = QuantumCircuit(2)
+qc.h(0)  # переводим первый кубит в состояние суперпозиции
+
+qс_job = assemble(qc)
+final_state = sim.run(qс_job).result()
+print(final_state.get_statevector())  # проверяем, оставив второй без изменений
+
+qc = QuantumCircuit(2)
+qc.h(0)  # переводим первый кубит в состояние суперпозиции
+qc.cx(0, 1)  # применяем CNOT
+print(qc)
+
+qс_job = assemble(qc)
+final_state = sim.run(qс_job).result()
+print(final_state.get_statevector())  # видим что эта операция привела к запутыванию кубитов
+# как это работает:
+# |a> = [a[00], a[01], a[10], a[11]]
+# CNOT |a> =  [a[00], a[11], a[10], a[01]]
+
+print('________________')
+print()
+

@@ -1,4 +1,4 @@
-from qiskit import QuantumCircuit, assemble, Aer
+"""from qiskit import QuantumCircuit, assemble, Aer
 from math import sqrt
 
 
@@ -70,4 +70,16 @@ print(final_state.get_statevector())  # видим что эта операци�
 
 print('________________')
 print()
+"""
 
+
+
+from qiskit import QuantumCircuit
+
+qc = QuantumCircuit(2)
+
+qc.h(1)
+qc.cx(0, 1)  # X -> controlled-Z (HXH = Z, HZH = X)
+qc.h(1)
+
+print(qc)

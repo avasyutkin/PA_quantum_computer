@@ -1,14 +1,14 @@
 import numpy as np
 from qiskit import QuantumCircuit, Aer, transpile, assemble
-from math import gcd
-from numpy.random import randint
 import pandas as pd
 from fractions import Fraction
 
 
+# U|y> = |ay mod 15>
+# возвращает controlled-U элемент для а, повторяющийся power раз
 def c_amod15(a, power):
     if a not in [2, 7, 8, 11, 13]:
-        raise ValueError("'a' must be 2, 7, 8, 11 or 13")
+        raise ValueError("Число 'a' должно быть 2, 7, 8, 11 или 13")
     U = QuantumCircuit(4)
     for iteration in range(power):
         if a in [2, 13]:
@@ -26,14 +26,11 @@ def c_amod15(a, power):
             for q in range(4):
                 U.x(q)
     U = U.to_gate()
-    U.name = "%i^%i mod 15" % (a, power)
     c_U = U.control()
     return c_U
 
 
-n_count = 8
-a = 13
-
+# схема QFT (Квантовое преобразование Фурье)
 def qft_dagger(n):
     qc = QuantumCircuit(n)
     for qubit in range(n//2):
@@ -42,52 +39,63 @@ def qft_dagger(n):
         for m in range(j):
             qc.cp(-np.pi/float(2**(j-m)), m, j)
         qc.h(j)
-    qc.name = "QFT†"
     return qc
 
 
+n_count = 8
+a = 13
 
 qc = QuantumCircuit(n_count + 4, n_count)
 
-
+# инициализация расчетных кубитов в состоянии |+>
 for q in range(n_count):
     qc.h(q)
 
+# вспомогательные регистры в состоянии |1>
 qc.x(3 + n_count)
 
+# выполнение controlled-U операции
 for q in range(n_count):
     qc.append(c_amod15(a, 2 ** q),
               [q] + [i + n_count for i in range(4)])
 
+# выполнение inverse-QFT
 qc.append(qft_dagger(n_count), range(n_count))
 
+# измерение схемы
 qc.measure(range(n_count), range(n_count))
 print(qc)
+print()
 
+# создание симулятора для посмотра результатов измерений
 qasm_sim = Aer.get_backend('qasm_simulator')
 t_qc = transpile(qc, qasm_sim)
 qobj = assemble(t_qc)
 results = qasm_sim.run(qobj).result()
 counts = results.get_counts()
 print(counts)
+print()
 
+# вывод результатов
 rows, measured_phases = [], []
 for output in counts:
-    decimal = int(output, 2)
-    phase = decimal/(2**n_count)
+    decimal = int(output, 2)  # преобразование из двоичной системы в десятичную
+    phase = decimal/(2**n_count)  # поиск значений фаз
     measured_phases.append(phase)
     rows.append([f"{output}(bin) = {decimal:>3}(dec)",
                  f"{decimal}/{2**n_count} = {phase:.2f}"])
 
-headers=["Register Output", "Phase"]
+headers = ["Выходной регистр", "Фаза"]
 df = pd.DataFrame(rows, columns=headers)
 print(df)
+print()
 
+# вывод результата на основании найденных фаз
 rows = []
 for phase in measured_phases:
     frac = Fraction(phase).limit_denominator(15)
     rows.append([phase, f"{frac.numerator}/{frac.denominator}", frac.denominator])
 
-headers=["Phase", "Fraction", "Guess for r"]
+headers = ["Фаза", "Дробь", "Результат угадывания периода"]
 df = pd.DataFrame(rows, columns=headers)
 print(df)

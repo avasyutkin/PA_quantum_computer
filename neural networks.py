@@ -1,22 +1,21 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
 import torch
 from torch.autograd import Function
 from torchvision import datasets, transforms
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
-
 import qiskit
-from qiskit import transpile, assemble
-from qiskit.visualization import *
+from qiskit import IBMQ, transpile, assemble
+
+IBMQ.enable_account('1a00f5bbc284ae034817692672536163339e24da7abe36a1c90d66c3498e14e4a971a1e94bfa8953307ac55ccd200975eceac7dcff6c02a99e0eb4840a3d3192')
 
 
 class QuantumCircuit:
 
-
     def __init__(self, n_qubits, backend, shots):
+        # определение схемы
         self._circuit = qiskit.QuantumCircuit(n_qubits)
 
         all_qubits = [i for i in range(n_qubits)]
@@ -31,29 +30,36 @@ class QuantumCircuit:
         self.backend = backend
         self.shots = shots
 
+    # запуск вычисления состояний
     def run(self, thetas):
-        t_qc = transpile(self._circuit,
-                         self.backend)
-        qobj = assemble(t_qc,
-                        shots=self.shots,
-                        parameter_binds=[{self.theta: theta} for theta in thetas])
+        t_qc = transpile(self._circuit, self.backend)
+
+        qobj = assemble(t_qc, shots=self.shots, parameter_binds=[{self.theta: theta} for theta in thetas])
         job = self.backend.run(qobj)
         result = job.result().get_counts()
 
         counts = np.array(list(result.values()))
         states = np.array(list(result.keys())).astype(float)
 
+        # вычисление вероятности для каждого состояния
         probabilities = counts / self.shots
+        # определение ожидаемого состояния
         expectation = np.sum(states * probabilities)
 
         return np.array([expectation])
 
 
+provider = IBMQ.get_provider(hub='ibm-q', group='open', project='main')
+simulator = provider.get_backend('ibmq_santiago')
+
+circuit = QuantumCircuit(1, simulator, 100)
+print(circuit._circuit) # рисуем квантовую схему
 
 
 class HybridFunction(Function):
 
     @staticmethod
+    # прямой переход к квантовым объктам
     def forward(ctx, input, quantum_circuit, shift):
         ctx.shift = shift
         ctx.quantum_circuit = quantum_circuit
@@ -65,6 +71,7 @@ class HybridFunction(Function):
         return result
 
     @staticmethod
+    # обратный переход к классическим объектам
     def backward(ctx, grad_output):
         input, expectation_z = ctx.saved_tensors
         input_list = np.array(input.tolist())
@@ -93,4 +100,135 @@ class Hybrid(nn.Module):
     def forward(self, input):
         return HybridFunction.apply(input, self.quantum_circuit, self.shift)
 
+
+# генерируем сто тренировочных объктов
+n_samples = 100
+
+X_train = datasets.MNIST(root='./data', train=True, download=True, transform=transforms.Compose([transforms.ToTensor()]))
+
+# оставляем только те, где указаны метки 0 или 1
+idx = np.append(np.where(X_train.targets == 0)[0][:n_samples], np.where(X_train.targets == 1)[0][:n_samples])
+
+X_train.data = X_train.data[idx]
+X_train.targets = X_train.targets[idx]
+
+train_loader = torch.utils.data.DataLoader(X_train, batch_size=1, shuffle=True)
+
+# отбираем 6 случных объектов среди тренировочных
+n_samples_show = 6
+
+data_iter = iter(train_loader)
+fig, axes = plt.subplots(nrows=1, ncols=n_samples_show, figsize=(10, 3))
+
+while n_samples_show > 0:
+    images, targets = data_iter.__next__()
+
+    axes[n_samples_show - 1].imshow(images[0].numpy().squeeze(), cmap='gray')
+    axes[n_samples_show - 1].set_xticks([])
+    axes[n_samples_show - 1].set_yticks([])
+    axes[n_samples_show - 1].set_title("Метка: {}".format(targets.item()))
+
+    n_samples_show -= 1
+
+
+# генерируем пятьдесят тестовых объктов
+n_samples = 50
+
+X_test = datasets.MNIST(root='./data', train=False, download=True, transform=transforms.Compose([transforms.ToTensor()]))
+
+# оставляем только те, где указаны метки 0 или 1
+idx = np.append(np.where(X_test.targets == 0)[0][:n_samples], np.where(X_test.targets == 1)[0][:n_samples])
+
+X_test.data = X_test.data[idx]
+X_test.targets = X_test.targets[idx]
+
+test_loader = torch.utils.data.DataLoader(X_test, batch_size=1, shuffle=True)
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(1, 6, kernel_size=5)
+        self.conv2 = nn.Conv2d(6, 16, kernel_size=5)
+        self.dropout = nn.Dropout2d()
+        self.fc1 = nn.Linear(256, 64)
+        self.fc2 = nn.Linear(64, 1)
+        self.hybrid = Hybrid(qiskit.Aer.get_backend('qasm_simulator'), 100, np.pi / 2)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, 2)
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, 2)
+        x = self.dropout(x)
+        x = x.view(1, -1)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        x = self.hybrid(x)
+        return torch.cat((x, 1 - x), -1)
+
+
+model = Net()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+loss_func = nn.NLLLoss()
+
+epochs = 20
+loss_list = []
+
+model.train()
+for epoch in range(epochs):
+    total_loss = []
+    for batch_idx, (data, target) in enumerate(train_loader):
+        optimizer.zero_grad()
+        # прямое преобразование
+        output = model(data)
+        # расчет потерь
+        loss = loss_func(output, target)
+        # обратное преобразование
+        loss.backward()
+        # Oптимизация весов
+        optimizer.step()
+
+        total_loss.append(loss.item())
+    loss_list.append(sum(total_loss) / len(total_loss))
+    print('Обучение [{:.0f}%]\tПотери: {:.4f}'.format(
+        100. * (epoch + 1) / epochs, loss_list[-1]))
+
+model.eval()
+with torch.no_grad():
+    correct = 0
+    for batch_idx, (data, target) in enumerate(test_loader):
+        output = model(data)
+
+        pred = output.argmax(dim=1, keepdim=True)
+        correct += pred.eq(target.view_as(pred)).sum().item()
+
+        loss = loss_func(output, target)
+        total_loss.append(loss.item())
+
+    print('Производительность на тестовых данных:\n\tПотери: {:.4f}\n\tТочность: {:.1f}%'.format(
+        sum(total_loss) / len(total_loss),
+        correct / len(test_loader) * 100)
+    )
+
+# отбираем 6 случных объектов среди тестовых
+n_samples_show = 6
+count = 0
+fig, axes = plt.subplots(nrows=1, ncols=n_samples_show, figsize=(10, 3))
+
+model.eval()
+with torch.no_grad():
+    for batch_idx, (data, target) in enumerate(test_loader):
+        if count == n_samples_show:
+            break
+        output = model(data)
+
+        pred = output.argmax(dim=1, keepdim=True)
+
+        axes[count].imshow(data[0].numpy().squeeze(), cmap='gray')
+
+        axes[count].set_xticks([])
+        axes[count].set_yticks([])
+        axes[count].set_title('Прогноз {}'.format(pred.item()))
+
+        count += 1
 
